@@ -15,7 +15,7 @@ Check that the following already exist before proceeding. If they don't, flag it
 
 - `turbo.json` at the root — if missing, run `bunx create-turbo@latest` first
 - `package.json` at the root with `"workspaces"` defined
-- `packages/eslint-config` in the monorepo — needed for Step 3. If it doesn't exist, tell the user to create it first or skip Step 3 and come back to it
+- `packages/eslint-config` in the monorepo — needed for Step 3. `create-turbo` generates this package by default, so it should already exist. However, the default scaffold exports a single default export — **not** a named `/base` export. Check before Step 3 by running: `cat packages/eslint-config/package.json` and looking for an `"exports"` field with a `"./base"` entry. If it's missing, follow the fix in Step 3
 - `bun.lock` or confirmation that bun is the package manager — if using npm/pnpm, adjust all `bun` commands accordingly
 
 ---
@@ -128,16 +128,55 @@ Thumbs.db
 
 ## Step 3: Configure ESLint
 
-> Skip this step if `packages/eslint-config` doesn't exist yet. Come back after creating it.
+First, verify that `packages/eslint-config` exports a `/base` entrypoint — `create-turbo` generates the package by default but does **not** include a `/base` export. Check:
 
-Create `eslint.config.mjs` at the root:
+```bash
+cat packages/eslint-config/package.json
+```
+
+Look for an `"exports"` field containing `"./base"`. If it's missing, add it:
+
+```json
+{
+  "name": "@repo/eslint-config",
+  "exports": {
+    "./base": "./base.js"
+  }
+}
+```
+
+Then create `packages/eslint-config/base.js` if it doesn't exist:
+
+```js
+import js from "@eslint/js";
+import tseslint from "typescript-eslint";
+
+export const config = tseslint.config(
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
+  {
+    rules: {
+      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
+      "@typescript-eslint/no-explicit-any": "warn",
+    },
+  }
+);
+```
+
+Install the required deps inside the package:
+
+```bash
+cd packages/eslint-config && bun add -d @eslint/js typescript-eslint
+```
+
+Now create `eslint.config.mjs` at the monorepo root:
 
 ```js
 import { config } from "@repo/eslint-config/base";
 export default config;
 ```
 
-**Verify:** Run `bun run lint` — it should lint without a module resolution error. If you see `Cannot find package '@repo/eslint-config'`, the package either doesn't exist or isn't linked. Check that `packages/eslint-config` exists and has a matching `name` field in its `package.json`.
+**Verify:** Run `bun run lint` — it should lint without a module resolution error. If you see `Cannot find package '@repo/eslint-config'`, run `bun install` from the root to re-link workspaces.
 
 ---
 
