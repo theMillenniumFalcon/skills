@@ -1,18 +1,18 @@
 ---
 name: prisma-setup
-description: Use this skill when the user wants to set up Prisma ORM in a project. Triggers when the user asks to add Prisma, configure a database connection, set up a schema, generate a Prisma client, or integrate Zod schema generation. Also use this when the user says things like "add Prisma to my project", "set up my database with Prisma", "configure Prisma ORM", or "how do I use Prisma" — even if they don't mention PostgreSQL or Zod specifically.
+description: Use this skill when the user wants to set up Prisma ORM in a project. Triggers when the user asks to add Prisma, configure a database connection, set up a schema, generate a Prisma client, or integrate Zod schema generation. Also use this when the user says things like "add Prisma to my project", "set up my database with Prisma", "configure Prisma ORM", or "how do I use Prisma" — even if they don't mention a specific database or Zod.
 ---
 
-# Prisma Setup (PostgreSQL + Zod)
+# Prisma Setup (PostgreSQL / MySQL / SQLite + Zod)
 
-A skill for setting up Prisma ORM with PostgreSQL and Zod schema generation via `zod-prisma-types`.
+A skill for setting up Prisma ORM with Zod schema generation via `zod-prisma-types`. Supports PostgreSQL, MySQL, and SQLite.
 
 ---
 
 ## Step 1: Install Dependencies
 
 ```bash
-bun add prisma @prisma/client zod-prisma-types
+bun add @prisma/client zod-prisma-types
 bun add -d prisma
 ```
 
@@ -32,24 +32,32 @@ This creates:
 
 ## Step 3: Configure Environment Variables
 
-Update `.env` at the root:
+Update `.env` based on your database:
 
+**PostgreSQL**
 ```env
 DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/DBNAME"
 ```
 
-Also add `.env` to `.gitignore` if not already there, and create a `.env.example`:
-
+**MySQL**
 ```env
-DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/DBNAME"
+DATABASE_URL="mysql://USER:PASSWORD@localhost:3306/DBNAME"
 ```
+
+**SQLite**
+```env
+DATABASE_URL="file:./dev.db"
+```
+
+Also add `.env` to `.gitignore` if not already there, and create a `.env.example` with the same format but empty credentials.
 
 ---
 
 ## Step 4: Configure prisma/schema.prisma
 
-Update the generator block to include `zod-prisma-types`:
+Update the generator and datasource blocks:
 
+**PostgreSQL**
 ```prisma
 generator client {
   provider = "prisma-client-js"
@@ -62,6 +70,40 @@ generator zod {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+```
+
+**MySQL**
+```prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+generator zod {
+  provider = "zod-prisma-types"
+  output   = "../src/lib/zod"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+```
+
+**SQLite**
+```prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+generator zod {
+  provider = "zod-prisma-types"
+  output   = "../src/lib/zod"
+}
+
+datasource db {
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 ```
@@ -112,6 +154,8 @@ import { prisma } from "@/lib/prisma";
 "db:reset": "prisma migrate reset"
 ```
 
+> Note: `prisma migrate` is not supported for SQLite in production — use `db:push` instead.
+
 ---
 
 ## Step 7: Run Initial Generate
@@ -128,8 +172,6 @@ This generates both the Prisma client and the Zod schemas in `src/lib/zod/`.
 
 ## Step 8: First Migration
 
-When you're ready to apply your schema to the database:
-
 ```bash
 bun run db:migrate
 ```
@@ -140,7 +182,8 @@ Prisma will prompt you to name the migration (e.g. `init`).
 
 ## Usage Notes
 
-- Use `bun run db:push` for rapid prototyping — it syncs the schema without creating migration files
-- Use `bun run db:migrate` for any real/production-bound work — it creates versioned migration files
+- Use `bun run db:push` for rapid prototyping — syncs the schema without creating migration files
+- Use `bun run db:migrate` for production-bound work — creates versioned migration files
 - Generated Zod schemas in `src/lib/zod/` are auto-updated every time you run `db:generate` — don't edit them manually
 - Always run `db:generate` after any change to `schema.prisma`
+- SQLite is great for local dev and simple apps but not recommended for production at scale
