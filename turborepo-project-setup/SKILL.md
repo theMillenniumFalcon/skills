@@ -109,36 +109,58 @@ Thumbs.db
 
 ---
 
-## Step 3: Configure turbo.json
+## Step 3: Configure ESLint
+
+> Note: This step assumes `@repo/eslint-config` already exists as a package in your monorepo (e.g. `packages/eslint-config`). If it doesn't, create it first before proceeding.
+
+Create `eslint.config.mjs` at the root:
+
+```js
+import { config } from "@repo/eslint-config/base";
+export default config;
+```
+
+---
+
+## Step 4: Configure turbo.json
 
 Add these to the `tasks` object in `turbo.json`:
 
 ```json
+"lint": {},
 "format": {
   "cache": false
 },
 "format:check": {
   "cache": false
+},
+"check-types": {
+  "cache": false
+},
+"build": {
+  "dependsOn": ["^build"],
+  "outputs": [".next/**", "dist/**"]
 }
 ```
 
 ---
 
-## Step 4: Add Scripts to package.json
+## Step 5: Add Scripts to package.json
 
 Add these to the `scripts` section of the root `package.json`:
 
 ```json
 "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,mdx,css}\"",
 "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,mdx,css}\"",
+"lint": "eslint .",
 "lint-staged": "lint-staged",
+"check-types": "tsc --noEmit",
 "prepare": "husky"
 ```
 
-
 ---
 
-## Step 5: Initialize Husky
+## Step 6: Initialize Husky
 
 ```bash
 bun run husky init
@@ -152,7 +174,7 @@ bun run lint-staged
 
 ---
 
-## Step 6: Configure lint-staged
+## Step 7: Configure lint-staged
 
 Create `.lintstagedrc.json` at the root:
 
@@ -165,7 +187,7 @@ Create `.lintstagedrc.json` at the root:
 
 ---
 
-## Step 7: Add GitHub CI Pipeline
+## Step 8: Add GitHub CI Pipeline
 
 Create `.github/workflows/ci.yml`:
 
@@ -229,15 +251,4 @@ jobs:
         run: bun install
       - name: Build
         run: bun run build
-```
-
----
-
-## Step 8: Configure ESLint
-
-Create `eslint.config.mjs` at the root:
-
-```js
-import { config } from "@repo/eslint-config/base";
-export default config;
 ```
