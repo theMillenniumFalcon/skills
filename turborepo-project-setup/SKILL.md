@@ -5,11 +5,24 @@ description: Use this skill when the user wants to configure or set up tooling o
 
 # Turborepo Project Setup (Production Grade)
 
-A skill for setting up tooling on a production-ready Turborepo monorepo, with Prettier, Husky, and lint-staged configured out of the box.
+A skill for setting up tooling on a production-ready Turborepo monorepo — Prettier, ESLint, Husky, lint-staged, and GitHub CI.
+
+---
+
+## Before You Start
+
+Check that the following already exist before proceeding. If they don't, flag it to the user:
+
+- `turbo.json` at the root — if missing, run `bunx create-turbo@latest` first
+- `package.json` at the root with `"workspaces"` defined
+- `packages/eslint-config` in the monorepo — needed for Step 3. If it doesn't exist, tell the user to create it first or skip Step 3 and come back to it
+- `bun.lock` or confirmation that bun is the package manager — if using npm/pnpm, adjust all `bun` commands accordingly
 
 ---
 
 ## Step 1: Install Dev Dependencies
+
+Run this from the **root** of the monorepo:
 
 ```bash
 bun add -d prettier \
@@ -19,6 +32,8 @@ bun add -d prettier \
   lint-staged \
   eslint
 ```
+
+> If you see a workspace conflict error, add `-W` flag: `bun add -d -W prettier ...`
 
 ---
 
@@ -55,7 +70,7 @@ Create `.prettierrc.json` at the root:
 }
 ```
 
-Create `.prettierignore`:
+Create `.prettierignore` at the root:
 
 ```
 # Dependencies
@@ -107,11 +122,13 @@ yarn-error.log*
 Thumbs.db
 ```
 
+**Verify:** Run `bun run format` — it should format files without errors. If you see `Cannot find module '@trivago/prettier-plugin-sort-imports'`, the install didn't run from the root. Make sure you're not inside a workspace package.
+
 ---
 
 ## Step 3: Configure ESLint
 
-> Note: This step assumes `@repo/eslint-config` already exists as a package in your monorepo (e.g. `packages/eslint-config`). If it doesn't, create it first before proceeding.
+> Skip this step if `packages/eslint-config` doesn't exist yet. Come back after creating it.
 
 Create `eslint.config.mjs` at the root:
 
@@ -119,6 +136,8 @@ Create `eslint.config.mjs` at the root:
 import { config } from "@repo/eslint-config/base";
 export default config;
 ```
+
+**Verify:** Run `bun run lint` — it should lint without a module resolution error. If you see `Cannot find package '@repo/eslint-config'`, the package either doesn't exist or isn't linked. Check that `packages/eslint-config` exists and has a matching `name` field in its `package.json`.
 
 ---
 
@@ -143,11 +162,13 @@ Add these to the `tasks` object in `turbo.json`:
 }
 ```
 
+> `dependsOn: ["^build"]` means a package's build waits for all its dependencies to build first — this is correct for most monorepos. `outputs` tells Turborepo what to cache; adjust if your build output goes somewhere different (e.g. `out/**` for static Next.js exports).
+
 ---
 
 ## Step 5: Add Scripts to package.json
 
-Add these to the `scripts` section of the root `package.json`:
+Add these to the `scripts` section of the **root** `package.json`:
 
 ```json
 "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,mdx,css}\"",
@@ -166,11 +187,13 @@ Add these to the `scripts` section of the root `package.json`:
 bun run husky init
 ```
 
-This creates a `.husky/` folder with a `pre-commit` file. Replace its contents with:
+This creates `.husky/pre-commit`. Replace its contents with:
 
 ```bash
 bun run lint-staged
 ```
+
+**Verify:** Run `git commit --allow-empty -m "test"` — you should see lint-staged execute. If the hook doesn't fire, check that `.husky/pre-commit` is executable: `chmod +x .husky/pre-commit`.
 
 ---
 
@@ -252,3 +275,32 @@ jobs:
       - name: Build
         run: bun run build
 ```
+
+---
+
+## Final Verification Checklist
+
+Run through these to confirm everything is wired up correctly:
+
+- [ ] `bun run format` — formats files, no errors
+- [ ] `bun run format:check` — passes on a freshly formatted codebase
+- [ ] `bun run lint` — lints without module resolution errors
+- [ ] `bun run check-types` — no TypeScript errors
+- [ ] `bun run build` — builds all apps successfully
+- [ ] `git commit --allow-empty -m "test"` — triggers the pre-commit hook and lint-staged runs
+
+---
+
+## Common Errors
+
+**`Cannot find module 'prettier-plugin-tailwindcss'`**
+Prettier plugins must be installed at the root, not inside a workspace package. Re-run the install from the monorepo root.
+
+**`Husky pre-commit hook not firing`**
+Run `chmod +x .husky/pre-commit` and make sure `prepare` script ran via `bun install`.
+
+**`turbo: command not found`**
+Turbo is not installed. Run `bun add -d turbo -W` at the root.
+
+**`eslint: Cannot find module '@repo/eslint-config'`**
+The `packages/eslint-config` package isn't linked. Run `bun install` from the root to re-link workspaces.
