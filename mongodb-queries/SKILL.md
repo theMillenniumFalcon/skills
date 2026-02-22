@@ -89,6 +89,33 @@ const posts = await Post.find({ _id: { $gt: lastSeenId } })
 
 ---
 
+### populate() vs $lookup — Know When to Switch
+
+`populate()` is convenient but fires a separate query per call — it's N+1 queries under the hood. Use `$lookup` in aggregations for real joins.
+
+```ts
+// ✗ populate() — 2 round trips (1 for posts, 1 for users)
+const posts = await Post.find().populate("authorId", "name email").lean();
+
+// ✓ $lookup — single round trip, more efficient at scale
+const posts = await Post.aggregate([
+  {
+    $lookup: {
+      from: "users",
+      localField: "authorId",
+      foreignField: "_id",
+      as: "author",
+      pipeline: [{ $project: { name: 1, email: 1 } }],
+    },
+  },
+  { $unwind: "$author" },
+]);
+```
+
+> Use `populate()` for simple, low-traffic cases. Switch to `$lookup` when you're joining large collections or need pipeline-level control.
+
+---
+
 ## 2. Indexes
 
 ### Define Indexes in Schema
@@ -129,6 +156,21 @@ const user = await User.findOne({ email: "test@example.com" })
 
 ---
 
+### Always Index Soft Delete Fields in Compound Indexes
+
+Without this, every query filtering `deletedAt: null` does a full collection scan.
+
+```ts
+// ✗ Missing — full scan on every query
+postSchema.index({ createdAt: -1 });
+
+// ✓ Include deletedAt in compound index
+postSchema.index({ deletedAt: 1, createdAt: -1 });
+postSchema.index({ deletedAt: 1, authorId: 1 });
+```
+
+---
+
 ## 3. Aggregation Pipelines
 
 ### Basic Pipeline Structure
@@ -143,7 +185,42 @@ const results = await Order.aggregate([
 ]);
 ```
 
-> **Rule:** Always `$match` and `$limit` as early as possible in the pipeline. Every subsequent stage processes fewer documents.
+> **Rule:** Always `$match` and `$limit` as early as possible. Every subsequent stage processes fewer documents.
+
+---
+
+### Type-Safe Aggregations
+
+Always type the output of `.aggregate<T>()` — otherwise the result is `any[]`.
+
+```ts
+interface OrderWithUser {
+  _id: Types.ObjectId;
+  total: number;
+  status: string;
+  user: {
+    name: string;
+    email: string;
+  };
+}
+
+const orders = await Order.aggregate<OrderWithUser>([
+  { $match: { status: "completed" } },
+  {
+    $lookup: {
+      from: "users",
+      localField: "userId",
+      foreignField: "_id",
+      as: "user",
+      pipeline: [{ $project: { name: 1, email: 1 } }],
+    },
+  },
+  { $unwind: "$user" },
+  { $project: { total: 1, status: 1, user: 1 } },
+]);
+
+// orders is now OrderWithUser[] — fully typed
+```
 
 ---
 
@@ -172,8 +249,14 @@ const orders = await Order.aggregate([
 ### $group — Aggregate and Count
 
 ```ts
-// Count orders per user
-const orderCounts = await Order.aggregate([
+interface UserOrderStats {
+  _id: Types.ObjectId;
+  totalOrders: number;
+  totalRevenue: number;
+  avgAmount: number;
+}
+
+const orderCounts = await Order.aggregate<UserOrderStats>([
   { $match: { status: "completed" } },
   {
     $group: {
@@ -190,19 +273,24 @@ const orderCounts = await Order.aggregate([
 
 ---
 
-### $facet — Multiple Aggregations in One Query
+### $facet — Paginated Results + Total Count in One Query
 
-Useful for paginated results + total count in a single round trip:
+> Note: `$facet` uses `$skip` internally which has the same scaling limitations as `.skip()`. Use only for moderate dataset sizes or when offset-based pagination is an explicit requirement (e.g. page numbers in a UI).
 
 ```ts
-const result = await Product.aggregate([
+interface PaginatedResult<T> {
+  data: T[];
+  totalCount: { count: number }[];
+}
+
+const result = await Product.aggregate<PaginatedResult<IProduct>>([
   { $match: { category: "electronics" } },
   {
     $facet: {
       data: [
         { $sort: { price: 1 } },
-        { $skip: 0 },
-        { $limit: 20 },
+        { $skip: page * limit },
+        { $limit: limit },
       ],
       totalCount: [
         { $count: "count" },
@@ -232,7 +320,9 @@ const users = await User.aggregate([
 
 ---
 
-## 4. Atomic Updates — Prefer findOneAndUpdate Over Find + Save
+## 4. Atomic Updates
+
+### Prefer findOneAndUpdate Over Find + Save
 
 ```ts
 // ✗ Two round trips + race condition risk
@@ -248,7 +338,27 @@ const post = await Post.findByIdAndUpdate(
 );
 ```
 
-Common atomic operators:
+---
+
+### Always Use runValidators: true on Updates
+
+Without it, Mongoose skips schema validation entirely on `findByIdAndUpdate` and `updateOne`.
+
+```ts
+// ✗ Skips validation — can write invalid data
+await User.findByIdAndUpdate(id, { email: "not-an-email" });
+
+// ✓ Runs schema validators on update
+await User.findByIdAndUpdate(
+  id,
+  { email: "valid@email.com" },
+  { new: true, runValidators: true, lean: true }
+);
+```
+
+---
+
+### Common Atomic Operators
 
 ```ts
 // Add to set (no duplicates)
@@ -260,11 +370,50 @@ Common atomic operators:
 // Remove from array
 { $pull: { tags: "deprecated" } }
 
-// Increment
+// Increment / decrement
 { $inc: { views: 1, score: -5 } }
 
-// Set only if field doesn't exist
+// Set only if field doesn't exist (useful for upserts)
 { $setOnInsert: { createdAt: new Date() } }
+```
+
+---
+
+### bulkWrite — Batch Operations
+
+Never do 100 individual updates in a loop. Use `bulkWrite` — single round trip, orders of magnitude faster.
+
+```ts
+// ✗ 100 round trips
+for (const item of items) {
+  await Product.findByIdAndUpdate(item.id, { $inc: { stock: -item.qty } });
+}
+
+// ✓ Single round trip
+await Product.bulkWrite(
+  items.map((item) => ({
+    updateOne: {
+      filter: { _id: item.id },
+      update: { $inc: { stock: -item.qty } },
+    },
+  }))
+);
+```
+
+Other `bulkWrite` operation types:
+
+```ts
+// Insert
+{ insertOne: { document: { name: "New Product" } } }
+
+// Replace entire document
+{ replaceOne: { filter: { _id: id }, replacement: newDoc } }
+
+// Delete
+{ deleteOne: { filter: { _id: id } } }
+
+// Upsert
+{ updateOne: { filter: { sku: "ABC" }, update: { $set: { price: 9.99 } }, upsert: true } }
 ```
 
 ---
@@ -287,7 +436,7 @@ const userSchema = new Schema({
 // ✓ REFERENCE — data is large, updated independently, or shared
 const postSchema = new Schema({
   title: String,
-  authorId: { type: Schema.Types.ObjectId, ref: "User" }, // reference
+  authorId: { type: Schema.Types.ObjectId, ref: "User" },
 });
 ```
 
@@ -297,18 +446,62 @@ const postSchema = new Schema({
 
 ### Hybrid Pattern — Embed Hot Fields, Reference the Rest
 
+Avoids expensive `$lookup` for frequently read fields while keeping the full document normalized.
+
 ```ts
 const orderSchema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: "User" },
-  // Embed frequently read fields directly
+  // Embed frequently read fields — avoids $lookup on every read
   userName: String,
   userEmail: String,
-  // Reference full user for edge cases
   shipping: {
     address: String,
-    status: { type: String, default: "processing" }, // hot field — queried often
+    status: { type: String, default: "processing" },
   },
 });
+```
+
+---
+
+### Bucket Pattern — For Time-Series or Activity Data
+
+Instead of one document per event (millions of tiny docs), group events into buckets. Dramatically reduces document count and index size.
+
+```ts
+// ✗ One document per metric reading — scales poorly
+{ sensorId: "s1", value: 22.4, timestamp: ISODate("...") }
+{ sensorId: "s1", value: 22.6, timestamp: ISODate("...") }
+// ... millions of docs
+
+// ✓ Bucket pattern — group readings per hour
+const bucketSchema = new Schema({
+  sensorId: String,
+  date: Date,                  // truncated to hour
+  readings: [
+    {
+      value: Number,
+      timestamp: Date,
+    },
+  ],
+  count: { type: Number, default: 0 },
+  avg: Number,
+  min: Number,
+  max: Number,
+});
+
+bucketSchema.index({ sensorId: 1, date: -1 });
+
+// Insert into bucket — add to existing bucket or create new one
+await Bucket.findOneAndUpdate(
+  { sensorId, date: hourStart, count: { $lt: 200 } }, // max 200 per bucket
+  {
+    $push: { readings: { value, timestamp } },
+    $inc: { count: 1 },
+    $min: { min: value },
+    $max: { max: value },
+  },
+  { upsert: true }
+);
 ```
 
 ---
@@ -320,6 +513,9 @@ const postSchema = new Schema({
   title: String,
   deletedAt: { type: Date, default: null },
 });
+
+// Compound index — required so queries don't full-scan
+postSchema.index({ deletedAt: 1, createdAt: -1 });
 
 // Always filter soft-deleted docs
 const posts = await Post.find({ deletedAt: null }).lean();
@@ -339,13 +535,12 @@ const session = await mongoose.startSession();
 
 try {
   await session.withTransaction(async () => {
-    // All operations use the same session
     await Order.create([{ userId, items, total }], { session });
 
     await User.findByIdAndUpdate(
       userId,
       { $inc: { orderCount: 1 } },
-      { session }
+      { session, runValidators: true }
     );
 
     await Inventory.findByIdAndUpdate(
@@ -359,7 +554,7 @@ try {
 }
 ```
 
-> Transactions require a MongoDB replica set or Atlas cluster. They don't work on standalone instances. Use them sparingly — they have a performance cost.
+> Transactions require a MongoDB replica set or Atlas cluster — they don't work on standalone instances. Use them sparingly; they have a performance cost and hold locks for the duration.
 
 ---
 
@@ -367,11 +562,14 @@ try {
 
 | ✓ Do | ✗ Don't |
 |------|---------|
-| Use `.lean()` for reads | Fetch full documents for read-only use |
+| `.lean()` for read-only queries | Fetch full documents for read-only use |
 | Project only needed fields | Return entire documents |
-| `$match` early in pipelines | `$lookup` before `$match` |
+| Type aggregations with `aggregate<T>()` | Leave aggregation results as `any[]` |
+| `$match` + `$limit` early in pipelines | `$lookup` before `$match` |
+| `$lookup` for join-heavy reads | `populate()` on large collections |
 | Cursor pagination with `_id` | `.skip()` at scale |
-| `findOneAndUpdate` for atomic ops | Find + modify + save |
-| Index queried/sorted fields | Over-index (slows writes) |
-| `select: false` for sensitive fields | Expose password/email by default |
+| `findOneAndUpdate` with `runValidators: true` | Find + modify + save |
+| `bulkWrite` for batch updates | Looping individual updates |
+| Index soft-delete fields in compound indexes | Unindexed `deletedAt: null` filters |
 | `session.withTransaction()` | Manual commit/abort |
+| Bucket pattern for time-series data | One document per event |
