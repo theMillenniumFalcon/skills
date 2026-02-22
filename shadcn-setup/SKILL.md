@@ -240,7 +240,7 @@ export default function Page() {
 Run the bundled script to install the baseline components used in every project:
 
 ```bash
-bash scripts/add-components.sh
+node scripts/add-components.js
 ```
 
 This installs: `button`, `badge`, `card`, `input`, `dialog`, `dropdown-menu`.
