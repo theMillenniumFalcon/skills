@@ -30,6 +30,7 @@ npx skills add themillenniumfalcon/skills
 | [`shadcn-setup`](./skills/shadcn-setup/SKILL.md) | Set up shadcn/ui with Tailwind v4, CSS variables, custom brand theme, and a baseline component script |
 | [`env-validation-setup`](./skills/env-validation-setup/SKILL.md) | Type-safe, build-time validated environment variables using `@t3-oss/env-nextjs` and Zod |
 | [`stripe-setup`](./skills/stripe-setup/SKILL.md) | Integrate Stripe into a Next.js App Router project — one-time payments, subscriptions, webhooks, plan-based feature gating, and usage tracking |
+| [`email-setup`](./skills/email-setup/SKILL.md) | Transactional email with Resend and React Email — welcome, password reset, and invoice templates, Better Auth integration, and webhook handling |
 
 ### Go
 
