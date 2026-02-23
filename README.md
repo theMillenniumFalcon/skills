@@ -29,6 +29,7 @@ npx skills add themillenniumfalcon/skills
 | [`better-auth-setup`](./skills/better-auth-setup/SKILL.md) | Set up Better Auth in a Next.js App Router project — Prisma adapter, Email & Password, Google OAuth, and Admin plugin |
 | [`shadcn-setup`](./skills/shadcn-setup/SKILL.md) | Set up shadcn/ui with Tailwind v4, CSS variables, custom brand theme, and a baseline component script |
 | [`env-validation-setup`](./skills/env-validation-setup/SKILL.md) | Type-safe, build-time validated environment variables using `@t3-oss/env-nextjs` and Zod |
+| [`stripe-setup`](./skills/stripe-setup/SKILL.md) | Integrate Stripe into a Next.js App Router project — one-time payments, subscriptions, webhooks, plan-based feature gating, and usage tracking |
 
 ### Go
 
